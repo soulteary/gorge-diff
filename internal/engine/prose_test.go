@@ -638,3 +638,293 @@ func TestBuildProseDiff_Level3(t *testing.T) {
 		t.Fatal("expected non-empty result at character level")
 	}
 }
+
+func TestBuildProseDiff_TooLargeSkipsRecursion(t *testing.T) {
+	var oldParts, newParts []string
+	for i := 0; i < 200; i++ {
+		oldParts = append(oldParts, "old")
+		newParts = append(newParts, "new")
+	}
+	old := ""
+	for i, p := range oldParts {
+		if i > 0 {
+			old += ". "
+		}
+		old += p
+	}
+	new_ := ""
+	for i, p := range newParts {
+		if i > 0 {
+			new_ += ". "
+		}
+		new_ += p
+	}
+
+	result := buildProseDiff(old, new_, 1)
+	if len(result) == 0 {
+		t.Fatal("expected non-empty result for tooLarge input")
+	}
+	hasDel, hasIns := false, false
+	for _, p := range result {
+		if p.Type == "-" {
+			hasDel = true
+		}
+		if p.Type == "+" {
+			hasIns = true
+		}
+	}
+	if !hasDel || !hasIns {
+		t.Fatalf("expected -/+ parts for tooLarge fallback, got %+v", result)
+	}
+}
+
+func TestStitchPieces_TrailingEmptyAtLevelTwo(t *testing.T) {
+	parts := []string{"hello", "world", ""}
+	delims := []string{" ", " "}
+	result := stitchPieces(parts, delims, 2)
+	for _, r := range result {
+		if r == "" {
+			t.Fatal("trailing empty string should have been trimmed at level 2")
+		}
+	}
+}
+
+func TestBuildProseDiff_EmptyChangeBlock(t *testing.T) {
+	result := buildProseDiff("\n\n", "\n\n", 0)
+	for _, p := range result {
+		if (p.Type == "-" || p.Type == "+") && p.Text == "" {
+			t.Fatal("should not produce empty change parts")
+		}
+	}
+}
+
+func TestGenerateProseDiff_ParagraphDeletion(t *testing.T) {
+	result := GenerateProseDiff(&ProseRequest{
+		Old: "para1\n\npara2\n\npara3",
+		New: "para1\n\npara3",
+	})
+
+	hasDel := false
+	for _, p := range result.Parts {
+		if p.Type == "-" {
+			hasDel = true
+		}
+	}
+	if !hasDel {
+		t.Fatal("expected deletion for removed paragraph")
+	}
+}
+
+func TestGenerateProseDiff_SentenceLevelChange(t *testing.T) {
+	result := GenerateProseDiff(&ProseRequest{
+		Old: "First sentence. Second sentence. Third sentence.",
+		New: "First sentence. Changed sentence. Third sentence.",
+	})
+
+	if len(result.Parts) == 0 {
+		t.Fatal("expected non-empty parts")
+	}
+	hasEq, hasChange := false, false
+	for _, p := range result.Parts {
+		if p.Type == "=" {
+			hasEq = true
+		}
+		if p.Type == "-" || p.Type == "+" {
+			hasChange = true
+		}
+	}
+	if !hasEq || !hasChange {
+		t.Fatalf("expected = and -/+ parts for sentence-level change, got %+v", result.Parts)
+	}
+}
+
+func TestGenerateProseDiff_LongTextWithSmallChange(t *testing.T) {
+	old := "The quick brown fox jumps over the lazy dog. " +
+		"Pack my box with five dozen liquor jugs."
+	new_ := "The quick brown fox jumps over the lazy cat. " +
+		"Pack my box with five dozen liquor jugs."
+	result := GenerateProseDiff(&ProseRequest{Old: old, New: new_})
+
+	if len(result.Parts) == 0 {
+		t.Fatal("expected non-empty parts")
+	}
+	totalText := ""
+	for _, p := range result.Parts {
+		if p.Type == "=" || p.Type == "+" {
+			totalText += p.Text
+		}
+	}
+	if totalText != new_ {
+		t.Fatalf("reconstructed new text mismatch: got %q", totalText)
+	}
+}
+
+func TestGenerateProseDiff_UnicodeContent(t *testing.T) {
+	result := GenerateProseDiff(&ProseRequest{
+		Old: "你好世界",
+		New: "你好地球",
+	})
+
+	if len(result.Parts) == 0 {
+		t.Fatal("expected non-empty parts for unicode diff")
+	}
+	hasDel, hasIns := false, false
+	for _, p := range result.Parts {
+		if p.Type == "-" {
+			hasDel = true
+		}
+		if p.Type == "+" {
+			hasIns = true
+		}
+	}
+	if !hasDel || !hasIns {
+		t.Fatalf("expected -/+ parts for unicode change, got %+v", result.Parts)
+	}
+}
+
+func TestGenerateProseDiff_OnlyWhitespaceChange(t *testing.T) {
+	result := GenerateProseDiff(&ProseRequest{
+		Old: "hello world",
+		New: "hello  world",
+	})
+
+	if len(result.Parts) == 0 {
+		t.Fatal("expected non-empty parts for whitespace change")
+	}
+}
+
+func TestGenerateProseDiff_TextReconstruction(t *testing.T) {
+	tests := []struct {
+		name string
+		old  string
+		new_ string
+	}{
+		{"word swap", "the quick fox", "the slow fox"},
+		{"paragraph add", "para1", "para1\n\npara2"},
+		{"sentence change", "Hello world. Goodbye moon.", "Hello world. Goodbye sun."},
+		{"complete replace", "alpha", "beta"},
+		{"multi paragraph change", "A\n\nB\n\nC", "A\n\nX\n\nC"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GenerateProseDiff(&ProseRequest{Old: tt.old, New: tt.new_})
+			var oldRecon, newRecon string
+			for _, p := range result.Parts {
+				switch p.Type {
+				case "=":
+					oldRecon += p.Text
+					newRecon += p.Text
+				case "-":
+					oldRecon += p.Text
+				case "+":
+					newRecon += p.Text
+				}
+			}
+			if oldRecon != tt.old {
+				t.Errorf("old reconstruction mismatch: got %q, want %q", oldRecon, tt.old)
+			}
+			if newRecon != tt.new_ {
+				t.Errorf("new reconstruction mismatch: got %q, want %q", newRecon, tt.new_)
+			}
+		})
+	}
+}
+
+func TestHashDiff_IdenticalParts(t *testing.T) {
+	u := []string{"a", "b", "c"}
+	v := []string{"a", "b", "c"}
+	parts := hashDiff(u, v)
+
+	for _, p := range parts {
+		if p.Type != "=" {
+			t.Fatalf("expected all = parts for identical input, got %+v", parts)
+		}
+	}
+}
+
+func TestHashDiff_Empty(t *testing.T) {
+	parts := hashDiff(nil, nil)
+	if len(parts) != 0 {
+		t.Fatalf("expected 0 parts for empty inputs, got %d", len(parts))
+	}
+}
+
+func TestHashDiff_DuplicateContent(t *testing.T) {
+	u := []string{"x", "x", "x"}
+	v := []string{"x", "y", "x"}
+	parts := hashDiff(u, v)
+
+	hasIns := false
+	for _, p := range parts {
+		if p.Type == "+" {
+			hasIns = true
+		}
+	}
+	if !hasIns {
+		t.Fatalf("expected + part for inserted 'y', got %+v", parts)
+	}
+}
+
+func TestCombineRuns_PrefixAndSuffix(t *testing.T) {
+	oRun := []ProsePart{{Type: "-", Text: " hello."}}
+	nRun := []ProsePart{{Type: "+", Text: " world."}}
+	result := combineRuns(oRun, nRun)
+
+	if len(result) < 3 {
+		t.Fatalf("expected >= 3 parts (prefix + changes + suffix), got %d: %+v", len(result), result)
+	}
+	if result[0].Type != "=" || result[0].Text != " " {
+		t.Fatalf("expected prefix = ' ', got %+v", result[0])
+	}
+	last := result[len(result)-1]
+	if last.Type != "=" || last.Text != "." {
+		t.Fatalf("expected suffix = '.', got %+v", last)
+	}
+}
+
+func TestEditDistanceDiff_SingleElement(t *testing.T) {
+	u := []string{"a"}
+	v := []string{"b"}
+	parts, tooLarge := editDistanceDiff(u, v, 1)
+	if tooLarge {
+		t.Fatal("expected tooLarge=false")
+	}
+	if len(parts) == 0 {
+		t.Fatal("expected non-empty parts")
+	}
+	hasDel, hasIns := false, false
+	for _, p := range parts {
+		if p.Type == "-" {
+			hasDel = true
+		}
+		if p.Type == "+" {
+			hasIns = true
+		}
+	}
+	if !hasDel || !hasIns {
+		t.Fatalf("expected -/+ for single element replacement, got %+v", parts)
+	}
+}
+
+func TestEditDistanceDiff_LargeButUnderThreshold(t *testing.T) {
+	u := make([]string, 128)
+	v := make([]string, 128)
+	for i := range u {
+		u[i] = "same"
+		v[i] = "same"
+	}
+	v[64] = "changed"
+	parts, tooLarge := editDistanceDiff(u, v, 1)
+	if tooLarge {
+		t.Fatal("expected tooLarge=false for exactly 128 elements")
+	}
+	hasChange := false
+	for _, p := range parts {
+		if p.Type == "-" || p.Type == "+" {
+			hasChange = true
+		}
+	}
+	if !hasChange {
+		t.Fatal("expected change parts for modified element")
+	}
+}

@@ -358,3 +358,167 @@ func TestGenerateUnifiedDiff_NormalizeWithTabs(t *testing.T) {
 		t.Fatalf("expected equal=true after tab normalization, diff: %s", result.Diff)
 	}
 }
+
+func TestGenerateUnifiedDiff_NormalizeDifferent(t *testing.T) {
+	req := &DiffRequest{
+		Old:       "hello world\n",
+		New:       "helloxworld\n",
+		Normalize: true,
+	}
+	result := GenerateUnifiedDiff(req)
+
+	if result.Equal {
+		t.Fatal("expected equal=false: content differs even after normalization")
+	}
+}
+
+func TestGenerateUnifiedDiff_SingleLine(t *testing.T) {
+	req := &DiffRequest{
+		Old: "only\n",
+		New: "only\n",
+	}
+	result := GenerateUnifiedDiff(req)
+
+	if !result.Equal {
+		t.Fatal("expected equal=true")
+	}
+	if !strings.Contains(result.Diff, " only") {
+		t.Fatalf("expected context line ' only': %s", result.Diff)
+	}
+}
+
+func TestGenerateUnifiedDiff_NoTrailingNewline(t *testing.T) {
+	req := &DiffRequest{
+		Old: "line1\nline2",
+		New: "line1\nchanged",
+	}
+	result := GenerateUnifiedDiff(req)
+
+	if result.Equal {
+		t.Fatal("expected equal=false")
+	}
+	if !strings.Contains(result.Diff, "-line2") {
+		t.Fatalf("expected -line2: %s", result.Diff)
+	}
+	if !strings.Contains(result.Diff, "+changed") {
+		t.Fatalf("expected +changed: %s", result.Diff)
+	}
+}
+
+func TestGenerateUnifiedDiff_LargeInsert(t *testing.T) {
+	old := "first\nlast\n"
+	new_ := "first\na\nb\nc\nd\ne\nlast\n"
+	req := &DiffRequest{Old: old, New: new_}
+	result := GenerateUnifiedDiff(req)
+
+	if result.Equal {
+		t.Fatal("expected equal=false")
+	}
+	for _, expected := range []string{"+a", "+b", "+c", "+d", "+e"} {
+		if !strings.Contains(result.Diff, expected) {
+			t.Fatalf("expected %s in diff: %s", expected, result.Diff)
+		}
+	}
+	if !strings.Contains(result.Diff, " first") {
+		t.Fatalf("expected context ' first': %s", result.Diff)
+	}
+	if !strings.Contains(result.Diff, " last") {
+		t.Fatalf("expected context ' last': %s", result.Diff)
+	}
+}
+
+func TestGenerateUnifiedDiff_LargeDelete(t *testing.T) {
+	old := "first\na\nb\nc\nd\ne\nlast\n"
+	new_ := "first\nlast\n"
+	req := &DiffRequest{Old: old, New: new_}
+	result := GenerateUnifiedDiff(req)
+
+	if result.Equal {
+		t.Fatal("expected equal=false")
+	}
+	for _, expected := range []string{"-a", "-b", "-c", "-d", "-e"} {
+		if !strings.Contains(result.Diff, expected) {
+			t.Fatalf("expected %s in diff: %s", expected, result.Diff)
+		}
+	}
+}
+
+func TestGenerateUnifiedDiff_HunkCounts(t *testing.T) {
+	req := &DiffRequest{
+		Old: "a\nb\nc\n",
+		New: "a\nx\nc\ny\n",
+	}
+	result := GenerateUnifiedDiff(req)
+
+	if !strings.Contains(result.Diff, "@@ -1,3 +1,4 @@") {
+		t.Fatalf("expected hunk header @@ -1,3 +1,4 @@, got: %s", result.Diff)
+	}
+}
+
+func TestLCS_SingleMatch(t *testing.T) {
+	a := []string{"x", "a", "y"}
+	b := []string{"m", "a", "n"}
+	ops := lcs(a, b)
+
+	eqCount := 0
+	for _, op := range ops {
+		if op == opEqual {
+			eqCount++
+		}
+	}
+	if eqCount != 1 {
+		t.Fatalf("expected 1 equal op for 'a', got %d", eqCount)
+	}
+}
+
+func TestLCS_OneElement(t *testing.T) {
+	ops := lcs([]string{"a"}, []string{"a"})
+	if len(ops) != 1 || ops[0] != opEqual {
+		t.Fatalf("expected single equal op, got %v", ops)
+	}
+
+	ops2 := lcs([]string{"a"}, []string{"b"})
+	hasEq := false
+	for _, op := range ops2 {
+		if op == opEqual {
+			hasEq = true
+		}
+	}
+	if hasEq {
+		t.Fatal("expected no equal ops for different single elements")
+	}
+}
+
+func TestBuildIdenticalDiff_MultiLine(t *testing.T) {
+	lines := []string{"line1", "line2", "line3"}
+	diff := buildIdenticalDiff("a.txt", "b.txt", lines)
+
+	if !strings.Contains(diff, "@@ -1,3 +1,3 @@") {
+		t.Fatalf("bad hunk header for 3 lines: %s", diff)
+	}
+	for _, line := range lines {
+		if !strings.Contains(diff, " "+line) {
+			t.Fatalf("missing context line %q: %s", line, diff)
+		}
+	}
+}
+
+func TestFormatUnified_MixedOps(t *testing.T) {
+	ops := []editOp{opEqual, opDelete, opInsert, opEqual}
+	old := []string{"same1", "removed", "same2"}
+	new_ := []string{"same1", "added", "same2"}
+	result := formatUnified("a", "b", old, new_, ops)
+
+	if !strings.Contains(result, " same1") {
+		t.Fatalf("expected context ' same1': %s", result)
+	}
+	if !strings.Contains(result, "-removed") {
+		t.Fatalf("expected -removed: %s", result)
+	}
+	if !strings.Contains(result, "+added") {
+		t.Fatalf("expected +added: %s", result)
+	}
+	if !strings.Contains(result, " same2") {
+		t.Fatalf("expected context ' same2': %s", result)
+	}
+}
