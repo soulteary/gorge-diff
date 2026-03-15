@@ -14,7 +14,7 @@ Go 微服务，替代 Phorge PHP 中的 `PhabricatorDifferenceEngine`（系统 `
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
-| `LISTEN_ADDR` | `:8140` | 监听地址 |
+| `LISTEN_ADDR` | `:8130` | 监听地址 |
 | `SERVICE_TOKEN` | _(空)_ | 服务间认证令牌，为空则跳过校验 |
 | `MAX_BODY_SIZE` | `10M` | 请求体大小限制 |
 
@@ -23,7 +23,7 @@ Go 微服务，替代 Phorge PHP 中的 `PhabricatorDifferenceEngine`（系统 `
 ### 生成 Unified Diff
 
 ```bash
-curl -X POST http://localhost:8140/api/diff/generate \
+curl -X POST http://localhost:8130/api/diff/generate \
   -H 'Content-Type: application/json' \
   -d '{"old":"hello\nworld\n","new":"hello\ngopher\n","oldName":"a.txt","newName":"b.txt"}'
 ```
@@ -42,7 +42,7 @@ curl -X POST http://localhost:8140/api/diff/generate \
 ### 生成 Prose Diff
 
 ```bash
-curl -X POST http://localhost:8140/api/diff/prose \
+curl -X POST http://localhost:8130/api/diff/prose \
   -H 'Content-Type: application/json' \
   -d '{"old":"The quick brown fox","new":"The slow brown cat"}'
 ```
@@ -74,6 +74,6 @@ go run ./cmd/server
 ## Docker
 
 ```bash
-docker build -t github.com/soulteary/gorge-diff ./go-diff
-docker run -p 8140:8140 github.com/soulteary/gorge-diff
+docker build -t github.com/soulteary/gorge-diff .
+docker run -p 8130:8130 github.com/soulteary/gorge-diff
 ```
