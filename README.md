@@ -1,3 +1,6 @@
+项目合并至 https://github.com/soulteary/gorge 
+---
+
 # github.com/soulteary/gorge-diff
 
 Go 微服务，替代 Phorge PHP 中的 `PhabricatorDifferenceEngine`（系统 `diff` 调用）和 `PhutilProseDifferenceEngine`（文本级 prose diff）。
